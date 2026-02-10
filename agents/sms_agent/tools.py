@@ -24,21 +24,20 @@ def send_sms(to: str, message: str) -> dict:
     if not from_number:
         return {"status": "error", "detail": "TELNYX_PHONE_NUMBER is not configured."}
 
-    telnyx.api_key = api_key
-
     try:
-        response = telnyx.Message.create(
+        client = telnyx.Telnyx(api_key=api_key)
+        response = client.messages.send(
             from_=from_number,
             to=to,
             text=message,
         )
         return {
             "status": "success",
-            "message_id": response.id,
+            "message_id": response.data.id,
             "to": to,
             "detail": f"SMS sent successfully to {to}.",
         }
-    except telnyx.error.TelnyxError as e:
+    except telnyx.TelnyxError as e:
         return {
             "status": "error",
             "detail": f"Failed to send SMS: {str(e)}",

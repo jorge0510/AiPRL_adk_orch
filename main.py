@@ -53,9 +53,23 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+class UserContext(BaseModel):
+    """Optional context passed with requests to populate agent template variables."""
+    user_channel: str = ""
+    full_name: str = ""
+    email: str = ""
+    phone: str = ""
+
+
+class CreateSessionRequest(BaseModel):
+    user_id: str = "default_user"
+    context: UserContext | None = None
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    context: UserContext | None = None
 
 
 class ChatResponse(BaseModel):
@@ -79,13 +93,23 @@ async def health():
 
 
 @app.post("/sessions", response_model=SessionResponse)
-async def create_session(user_id: str = "default_user"):
-    """Create a new conversation session."""
+async def create_session(request: CreateSessionRequest = None):
+    """Create a new conversation session with optional user context."""
+    if request is None:
+        request = CreateSessionRequest()
+
     session_id = str(uuid.uuid4())
-    session_service.create_session(
+
+    # Build initial session state from context
+    initial_state = {}
+    if request.context:
+        initial_state = request.context.model_dump()
+
+    await session_service.create_session(
         app_name=APP_NAME,
-        user_id=user_id,
+        user_id=request.user_id,
         session_id=session_id,
+        state=initial_state,
     )
     return SessionResponse(
         session_id=session_id,
@@ -96,7 +120,7 @@ async def create_session(user_id: str = "default_user"):
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str, user_id: str = "default_user"):
     """Get session details and conversation history."""
-    session = session_service.get_session(
+    session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=user_id,
         session_id=session_id,
@@ -129,7 +153,7 @@ async def chat(request: ChatRequest):
     """Send a message and get the agent's response."""
     # Check session exists
     user_id = "default_user"
-    session = session_service.get_session(
+    session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=user_id,
         session_id=request.session_id,
@@ -139,6 +163,11 @@ async def chat(request: ChatRequest):
             status_code=404,
             detail="Session not found. Create one first via POST /sessions.",
         )
+
+    # Update session state with any provided context
+    if request.context:
+        for key, value in request.context.model_dump(exclude_unset=True).items():
+            session.state[key] = value
 
     # Build the user message content
     user_content = types.Content(
